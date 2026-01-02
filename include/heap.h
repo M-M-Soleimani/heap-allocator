@@ -21,6 +21,7 @@ typedef struct block_meta
     struct block_meta *next;
     struct block_meta *prev;
     uint32_t magic; // integrity check
+    int marked; // for GC
 } block_meta_t;
 
 // Allocation strategies
