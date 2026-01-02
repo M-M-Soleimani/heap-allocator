@@ -1,9 +1,11 @@
 #include "../include/heap.h"
 #include "../include/strategy.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -16,7 +18,14 @@
 block_meta_t *heap_start = NULL;
 static size_t heap_total_size = 0;
 
-// Align size to 8 bytes
+/* Heap canary for integrity */
+static uint32_t heap_canary = 0;
+
+/* Heap spray detection */
+#define SPRAY_THRESHOLD 32
+static size_t last_alloc_size = 0;
+static size_t same_size_count = 0;
+
 static size_t align8(size_t size)
 {
     return (size + 7) & ~0x7;
@@ -28,13 +37,17 @@ void split_block(block_meta_t *block, size_t size)
     if (block->size >= size + sizeof(block_meta_t) + 8)
     {
         block_meta_t *new_block = (block_meta_t *)((char *)block + sizeof(block_meta_t) + size);
+
         new_block->size = block->size - size - sizeof(block_meta_t);
         new_block->free = 1;
-        new_block->magic = BLOCK_MAGIC;
+        new_block->magic = BLOCK_MAGIC ^ heap_canary;
+
         new_block->next = block->next;
         new_block->prev = block;
+
         if (block->next)
             block->next->prev = new_block;
+
         block->next = new_block;
         block->size = size;
     }
@@ -92,12 +105,15 @@ int hinit(size_t heap_size)
         return HEAP_ERR_OOM;
     }
 
+    srand((unsigned)time(NULL));
+    heap_canary = (uint32_t)rand();
+
     heap_start = (block_meta_t *)ptr;
     heap_start->size = heap_size - sizeof(block_meta_t);
     heap_start->free = 1;
     heap_start->next = NULL;
     heap_start->prev = NULL;
-    heap_start->magic = BLOCK_MAGIC;
+    heap_start->magic = BLOCK_MAGIC ^ heap_canary;
 
     heap_total_size = heap_size;
 
@@ -116,6 +132,36 @@ void *halloc(size_t size)
     }
 
     size = align8(size);
+
+    /* Heap spray detection */
+    if (size == last_alloc_size)
+        same_size_count++;
+    else
+    {
+        last_alloc_size = size;
+        same_size_count = 1;
+    }
+
+    if (same_size_count > SPRAY_THRESHOLD)
+    {
+        fprintf(stderr,
+                "[SECURITY] Possible heap spraying detected "
+                "(%zu allocations of size %zu)\n",
+                same_size_count, size);
+    }
+
+    /* Allocation noise (mitigation) */
+    if ((rand() % 5) == 0)
+    {
+        block_meta_t *noise = current_strategy(align8(8));
+        if (noise)
+        {
+            split_block(noise, align8(8));
+            noise->free = 0;
+            noise->magic = BLOCK_MAGIC ^ heap_canary;
+        }
+    }
+
     block_meta_t *block = current_strategy(size);
     if (!block)
     {
@@ -125,7 +171,7 @@ void *halloc(size_t size)
 
     split_block(block, size);
     block->free = 0;
-    block->magic = BLOCK_MAGIC;
+    block->magic = BLOCK_MAGIC ^ heap_canary;
 
     return (char *)block + sizeof(block_meta_t);
 }
@@ -140,8 +186,8 @@ int hfree(void *ptr)
 
     block_meta_t *block = (block_meta_t *)((char *)ptr - sizeof(block_meta_t));
 
-    /* Magic check */
-    if (block->magic != BLOCK_MAGIC)
+    /* Integrity check */
+    if (block->magic != (BLOCK_MAGIC ^ heap_canary))
     {
         errno = EINVAL;
         return HEAP_ERR_INVALID_PTR;
@@ -167,6 +213,7 @@ void hdestroy()
 {
     if (!heap_start)
         return;
+
     platform_free(heap_start, heap_total_size);
     heap_start = NULL;
     heap_total_size = 0;
