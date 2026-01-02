@@ -37,4 +37,8 @@ int hfree(void *ptr);        // returns HEAP_OK / error code
 void hdestroy(void);
 void heap_dump(void);
 
+/* Split and coalesce prototypes */
+void split_block(block_meta_t *block, size_t size);
+void coalesce(block_meta_t *block);
+
 #endif

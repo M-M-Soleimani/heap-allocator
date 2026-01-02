@@ -22,8 +22,8 @@ static size_t align8(size_t size)
     return (size + 7) & ~0x7;
 }
 
-// Split block if it's larger than requested
-static void split_block(block_meta_t *block, size_t size)
+/* Split block if it's larger than requested */
+void split_block(block_meta_t *block, size_t size)
 {
     if (block->size >= size + sizeof(block_meta_t) + 8)
     {
@@ -40,8 +40,8 @@ static void split_block(block_meta_t *block, size_t size)
     }
 }
 
-// Coalesce with next block if free
-static void coalesce(block_meta_t *block)
+/* Coalesce with next block if free */
+void coalesce(block_meta_t *block)
 {
     if (block->next && block->next->free)
     {
@@ -140,7 +140,7 @@ int hfree(void *ptr)
 
     block_meta_t *block = (block_meta_t *)((char *)ptr - sizeof(block_meta_t));
 
-    // Magic check
+    /* Magic check */
     if (block->magic != BLOCK_MAGIC)
     {
         errno = EINVAL;
@@ -179,7 +179,8 @@ void heap_dump()
     printf("Heap Dump:\n");
     while (current)
     {
-        printf("Block %p | size: %zu | %s\n",(void *)current, current->size, current->free ? "free" : "used");
+        printf("Block %p | size: %zu | %s\n", (void *)current, current->size,
+               current->free ? "free" : "used");
         current = current->next;
     }
 }
